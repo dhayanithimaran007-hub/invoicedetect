@@ -253,9 +253,7 @@ export default function Login({
 
   if (onLoginSuccess) {
     onLoginSuccess(userName);
-  }
-
-  window.location.href = "/dashboard";
+}
 }, 3000);
   };
 
