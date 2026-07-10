@@ -7,7 +7,8 @@ import {
 import confetti from "canvas-confetti";
 import { detectFraud, generateDynamicInvoiceFromFile } from "../utils/fraudChecker";
 import { extractTextFromPDF, extractTextFromImage, parseInvoiceFields } from "../utils/ocrPipeline";
-import { uploadInvoiceFile, saveInvoiceRecord, saveFraudResult } from "../utils/supabaseService";
+import { uploadInvoiceFile, saveInvoiceRecord, saveFraudResult, fetchHistoricalInvoices } from "../utils/supabaseService";
+import LedgerDetailView from "./LedgerDetailView";
 import { computeSHA256Hash } from "../utils/hashUtils";
 
 export default function InvoicesView({ 
@@ -55,6 +56,10 @@ export default function InvoicesView({
 
   // Manual entry toggle
   const [showManualForm, setShowManualForm] = useState(false);
+  const [historicalInvoices, setHistoricalInvoices] = useState([]);
+  const [ledgerInvoiceId, setLedgerInvoiceId] = useState(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState("");
 
   // Form fields state for the 24 required manual entry parameters
   const [formFields, setFormFields] = useState({
@@ -97,7 +102,24 @@ export default function InvoicesView({
     "Generating AI Risk Score…"
   ];
 
-  // Trigger confetti for Safe uploads
+  useEffect(() => {
+    const loadHistoricalInvoices = async () => {
+      setIsLoadingHistory(true);
+      setHistoryError("");
+      try {
+        const history = await fetchHistoricalInvoices();
+        setHistoricalInvoices(history);
+      } catch (error) {
+        console.error("Unable to load historical invoices from Supabase:", error);
+        setHistoryError(error?.message || "Unable to load invoice history from Supabase.");
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    };
+
+    loadHistoricalInvoices();
+  }, []);
+
   useEffect(() => {
     if (uploadAlert && uploadAlert.status === "safe") {
       confetti({
@@ -114,7 +136,8 @@ export default function InvoicesView({
       const recordPayload = { ...invoiceData };
 
       if (currentUploadFile) {
-        const safeName = invoiceData.invoiceNumber.replace(/[^a-zA-Z0-9_-]/g, "_");
+        const invoiceRef = invoiceData.invoiceNumber || invoiceData.invoice_id || invoiceData.invoiceId || "invoice";
+        const safeName = String(invoiceRef).replace(/[^a-zA-Z0-9_-]/g, "_");
         const storagePath = `uploads/${safeName}_${Date.now()}_${currentUploadFile.name}`;
         await uploadInvoiceFile(currentUploadFile, storagePath);
         recordPayload.filePath = storagePath;
@@ -123,9 +146,15 @@ export default function InvoicesView({
 
       const savedInvoice = await saveInvoiceRecord(recordPayload);
       await saveFraudResult(savedInvoice.id, recordPayload);
+      setHistoricalInvoices(prev => [savedInvoice, ...prev]);
+      setHistoryError("");
       return savedInvoice;
     } catch (error) {
       console.error("Supabase persistence error:", error);
+      setUploadAlert({
+        status: "error",
+        message: error?.message || "The invoice was analyzed, but it could not be saved to Supabase."
+      });
       return null;
     }
   };
@@ -765,7 +794,7 @@ export default function InvoicesView({
               <button
                 onClick={() => {
                   setUploadAlert(null);
-                  onOpenInvoice(uploadAlert.invoiceNumber);
+                  setLedgerInvoiceId(uploadAlert.invoiceNumber);
                 }}
                 className="btn-premium btn-primary px-5 py-2 text-xs font-bold gap-2"
               >
@@ -1170,6 +1199,11 @@ export default function InvoicesView({
                     <tr key={inv.invoiceNumber} className="border-b border-white/5 hover:bg-white/2 transition-colors">
                       <td className="p-3">
                         <span className="font-bold text-white block">{inv.invoiceNumber}</span>
+                        {(inv.duplicateInvoice || inv.duplicateInvoiceId) && (
+                          <span className="mt-1 inline-flex items-center rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-red-400">
+                            DUPLICATE
+                          </span>
+                        )}
                         <span className="text-[9px] text-gray-600 block mt-0.5 font-mono">PO: {inv.poNumber}</span>
                       </td>
                       <td className="p-3 font-semibold text-gray-200">
@@ -1217,13 +1251,22 @@ export default function InvoicesView({
                         </span>
                       </td>
                       <td className="p-3 text-center">
-                        <button 
-                          onClick={() => onOpenInvoice(inv.invoiceNumber)}
-                          className="p-1.5 hover:bg-white/5 border border-transparent hover:border-white/10 rounded-lg text-blue-400 hover:text-white transition-all inline-flex items-center gap-1.5 text-[10px]"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          View Audit
-                        </button>
+                        <div className="flex items-center justify-center gap-2">
+                          <button 
+                            onClick={() => { setLedgerInvoiceId(inv.invoice_id || inv.invoiceNumber); }}
+                            className="p-1.5 hover:bg-white/5 border border-transparent hover:border-white/10 rounded-lg text-blue-400 hover:text-white transition-all inline-flex items-center gap-1.5 text-[10px]"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            Inspect Ledger
+                          </button>
+                          <button 
+                            onClick={() => onOpenInvoice(inv.invoiceNumber)}
+                            className="p-1.5 hover:bg-white/5 border border-transparent hover:border-white/10 rounded-lg text-blue-400 hover:text-white transition-all inline-flex items-center gap-1.5 text-[10px]"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            View Audit
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -1291,6 +1334,13 @@ export default function InvoicesView({
       )}
 
       {/* 2. OCR Text Verification & Fields Confirmation Modal */}
+      {ledgerInvoiceId && (
+        <LedgerDetailView
+          invoiceId={ledgerInvoiceId}
+          onClose={() => setLedgerInvoiceId(null)}
+        />
+      )}
+
       {showTextVerificationModal && tempInvoiceData && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center z-[1000] p-4 animate-fade-in">
           <div className="glass-panel w-full max-w-5xl p-6 md:p-8 relative flex flex-col shadow-[0_0_60px_rgba(59,130,246,0.15)] border border-white/10 animate-scale max-h-[90vh]">
@@ -1416,7 +1466,7 @@ export default function InvoicesView({
               <button
                 onClick={() => {
                   setShowTextVerificationModal(false);
-                  const analyzed = detectFraud(tempInvoiceData, invoices, vendors);
+                  const analyzed = detectFraud(tempInvoiceData, historicalInvoices, vendors);
                   runVerificationPipeline(analyzed);
                 }}
                 className="btn-premium btn-primary px-6 py-2.5 text-xs font-bold uppercase tracking-wider gap-2 shadow-[0_4px_20px_rgba(37,99,235,0.25)]"

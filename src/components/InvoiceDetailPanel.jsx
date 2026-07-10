@@ -397,6 +397,71 @@ export default function InvoiceDetailPanel({ invoice, invoices = [], vendors = [
           </div>
         </div>
 
+        {simulatedInvoice.ledgerComparison && (
+          <div className="glass-panel p-5 border border-red-500/20 bg-red-950/10">
+            <div className="flex items-center justify-between border-b border-white/5 pb-3 mb-4">
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-wider text-red-400">Ledger Comparison</h3>
+                <p className="text-[10px] text-gray-400 mt-1">Current invoice vs previous matching invoice from the ledger.</p>
+              </div>
+              <span className="rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-red-400">
+                Duplicate Match
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-xl border border-white/5 bg-slate-950/30 p-4">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Current Invoice</p>
+                <div className="mt-3 space-y-2 text-[11px] text-gray-300">
+                  <div className="flex justify-between gap-3"><span className="text-gray-500">Invoice ID</span><span className="font-semibold text-white">{simulatedInvoice.invoiceNumber}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-gray-500">Vendor</span><span className="font-semibold text-white">{simulatedInvoice.vendorName}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-gray-500">GST</span><span className="font-semibold text-white">{simulatedInvoice.gstNumber}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-gray-500">Amount</span><span className="font-semibold text-white">₹{Number(simulatedInvoice.amount || 0).toLocaleString()}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-gray-500">Date</span><span className="font-semibold text-white">{simulatedInvoice.invoiceDate}</span></div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/5 bg-slate-950/30 p-4">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Previous Matching Invoice</p>
+                <div className="mt-3 space-y-2 text-[11px] text-gray-300">
+                  <div className="flex justify-between gap-3"><span className="text-gray-500">Invoice ID</span><span className="font-semibold text-white">{simulatedInvoice.ledgerComparison.previousInvoice?.invoiceNumber || simulatedInvoice.ledgerComparison.previousInvoice?.invoice_id || "Not Detected"}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-gray-500">Vendor</span><span className="font-semibold text-white">{simulatedInvoice.ledgerComparison.previousInvoice?.vendorName || simulatedInvoice.ledgerComparison.previousInvoice?.vendor_name || "Not Detected"}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-gray-500">GST</span><span className="font-semibold text-white">{simulatedInvoice.ledgerComparison.previousInvoice?.gstNumber || simulatedInvoice.ledgerComparison.previousInvoice?.gst_number || "Not Detected"}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-gray-500">Amount</span><span className="font-semibold text-white">₹{Number(simulatedInvoice.ledgerComparison.previousInvoice?.total_amount || simulatedInvoice.ledgerComparison.previousInvoice?.totalAmount || simulatedInvoice.ledgerComparison.previousInvoice?.amount || 0).toLocaleString()}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-gray-500">Date</span><span className="font-semibold text-white">{simulatedInvoice.ledgerComparison.previousInvoice?.invoiceDate || simulatedInvoice.ledgerComparison.previousInvoice?.invoice_date || "Not Detected"}</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 overflow-hidden rounded-xl border border-white/5 bg-slate-950/40">
+              <table className="w-full text-[10px] text-left text-gray-300">
+                <thead className="bg-slate-950/70 text-gray-500 uppercase tracking-wider">
+                  <tr>
+                    <th className="p-3">Field</th>
+                    <th className="p-3">Current</th>
+                    <th className="p-3">Previous</th>
+                    <th className="p-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {simulatedInvoice.ledgerComparison.differences?.map((row, index) => (
+                    <tr key={index} className="border-t border-white/5">
+                      <td className="p-3 font-semibold text-white">{row.field}</td>
+                      <td className="p-3 text-gray-300">{row.currentValue}</td>
+                      <td className="p-3 text-gray-300">{row.previousValue}</td>
+                      <td className="p-3">
+                        <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${row.changed ? "bg-red-500/10 text-red-400" : "bg-emerald-500/10 text-emerald-400"}`}>
+                          {row.changed ? "Different" : "Match"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* ROW 2: AI EXPLANATION & ACTIONABLE RECOMMENDATIONS */}
         <div className="glass-panel p-5 border-l-2 border-l-amber-500 space-y-4">
           <div className="flex items-center gap-2 text-white">
