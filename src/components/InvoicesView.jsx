@@ -133,27 +133,67 @@ export default function InvoicesView({
   // Run the 8-step simulation pipeline
   const persistInvoiceToSupabase = async (invoiceData) => {
     try {
+      console.log("[Upload] Starting Supabase persistence:", { invoiceNumber: invoiceData.invoiceNumber });
       const recordPayload = { ...invoiceData };
 
+      // Step 1: Upload file to storage (if present)
       if (currentUploadFile) {
-        const invoiceRef = invoiceData.invoiceNumber || invoiceData.invoice_id || invoiceData.invoiceId || "invoice";
-        const safeName = String(invoiceRef).replace(/[^a-zA-Z0-9_-]/g, "_");
-        const storagePath = `uploads/${safeName}_${Date.now()}_${currentUploadFile.name}`;
-        await uploadInvoiceFile(currentUploadFile, storagePath);
-        recordPayload.filePath = storagePath;
-        recordPayload.filename = currentUploadFile.name;
+        try {
+          const invoiceRef = invoiceData.invoiceNumber || invoiceData.invoice_id || invoiceData.invoiceId || "invoice";
+          const safeName = String(invoiceRef).replace(/[^a-zA-Z0-9_-]/g, "_");
+          const storagePath = `uploads/${safeName}_${Date.now()}_${currentUploadFile.name}`;
+          console.log("[Upload] Uploading file to storage:", { storagePath });
+          await uploadInvoiceFile(currentUploadFile, storagePath);
+          recordPayload.filePath = storagePath;
+          recordPayload.filename = currentUploadFile.name;
+          console.log("[Upload] File uploaded successfully");
+        } catch (fileError) {
+          console.error("[Upload] File upload failed:", fileError);
+          // Continue anyway — file upload is non-critical
+          setUploadAlert({
+            status: "warning",
+            message: `Note: File could not be stored, but invoice will be saved. ${fileError?.message || ""}`
+          });
+        }
       }
 
-      const savedInvoice = await saveInvoiceRecord(recordPayload);
-      await saveFraudResult(savedInvoice.id, recordPayload);
-      setHistoricalInvoices(prev => [savedInvoice, ...prev]);
-      setHistoryError("");
-      return savedInvoice;
+      // Step 2: Save invoice record to database
+      try {
+        console.log("[Upload] Saving invoice record to database");
+        const savedInvoice = await saveInvoiceRecord(recordPayload);
+        console.log("[Upload] Invoice saved successfully:", { id: savedInvoice.id });
+
+        // Step 3: Save fraud result (non-critical)
+        try {
+          console.log("[Upload] Saving fraud result");
+          await saveFraudResult(savedInvoice.id, recordPayload);
+          console.log("[Upload] Fraud result saved");
+        } catch (fraudError) {
+          console.warn("[Upload] Fraud result save failed (non-critical):", fraudError);
+        }
+
+        // Update local history and show success
+        setHistoricalInvoices(prev => [savedInvoice, ...prev]);
+        setHistoryError("");
+
+        // Show success alert
+        setUploadAlert({
+          status: "success",
+          message: `✓ Invoice uploaded successfully! Invoice ID: ${savedInvoice.invoice_id || savedInvoice.id}`,
+          invoiceNumber: invoiceData.invoiceNumber
+        });
+
+        return savedInvoice;
+      } catch (dbError) {
+        console.error("[Upload] Database save failed:", dbError);
+        throw dbError;
+      }
     } catch (error) {
-      console.error("Supabase persistence error:", error);
+      console.error("[Upload] Supabase persistence error:", error);
       setUploadAlert({
         status: "error",
-        message: error?.message || "The invoice was analyzed, but it could not be saved to Supabase."
+        message: error?.message || "The invoice was analyzed, but it could not be saved to Supabase. Please try again.",
+        details: error?.details || error?.hint || ""
       });
       return null;
     }
@@ -183,10 +223,7 @@ export default function InvoicesView({
             setInvoices(prev => [invoiceData, ...prev]);
           }
 
-          // Persist audit record to Supabase in the background
-          persistInvoiceToSupabase(invoiceData);
-
-          // Trigger Results Dashboard Alert modal
+          // Trigger Results Dashboard Alert modal first
           setUploadAlert({
             status: invoiceData.riskLevel === "HIGH RISK" ? "fraud" : invoiceData.riskLevel === "SUSPICIOUS" ? "suspicious" : invoiceData.riskLevel === "REVIEW" ? "review" : "safe",
             invoiceNumber: invoiceData.invoiceNumber,
@@ -201,6 +238,9 @@ export default function InvoicesView({
             fraudType: invoiceData.fraudType,
             aiRecommendations: invoiceData.aiRecommendations
           });
+
+          // Persist audit record to Supabase in the background (non-blocking)
+          persistInvoiceToSupabase(invoiceData);
 
         }, 300);
       }
@@ -671,12 +711,51 @@ export default function InvoicesView({
                 <ShieldAlert className="w-8 h-8 text-red-400" />
               </div>
               <h3 className="text-base font-black text-white mb-2">Upload Failed</h3>
-              <p className="text-xs text-gray-400 leading-relaxed mb-6">{uploadAlert.message}</p>
+              <p className="text-xs text-gray-400 leading-relaxed mb-4">{uploadAlert.message}</p>
+              {uploadAlert.details && (
+                <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded text-left">
+                  <p className="text-[10px] text-red-300 font-mono break-words">{uploadAlert.details}</p>
+                </div>
+              )}
               <button
                 onClick={() => setUploadAlert(null)}
                 className="btn-premium btn-primary px-6 py-2.5 text-xs font-bold uppercase tracking-wider mx-auto"
               >
                 Try Again
+              </button>
+            </div>
+          ) : uploadAlert.status === "success" ? (
+            <div className="w-full max-w-md glass-panel p-8 border border-emerald-500/30 shadow-[0_20px_50px_rgba(16,185,129,0.1)] relative overflow-hidden animate-scale text-center">
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-48 rounded-full blur-3xl opacity-15 bg-emerald-500 pointer-events-none -translate-y-1/2" />
+              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-5">
+                <CheckCircle className="w-8 h-8 text-emerald-400" />
+              </div>
+              <h3 className="text-base font-black text-white mb-2">Upload Successful</h3>
+              <p className="text-xs text-gray-400 leading-relaxed mb-6">{uploadAlert.message}</p>
+              <button
+                onClick={() => {
+                  setUploadAlert(null);
+                  // Refresh history after successful upload
+                  fetchHistoricalInvoices().then(h => setHistoricalInvoices(h));
+                }}
+                className="btn-premium btn-primary px-6 py-2.5 text-xs font-bold uppercase tracking-wider mx-auto"
+              >
+                Close
+              </button>
+            </div>
+          ) : uploadAlert.status === "warning" ? (
+            <div className="w-full max-w-md glass-panel p-8 border border-yellow-500/30 shadow-[0_20px_50px_rgba(245,158,11,0.1)] relative overflow-hidden animate-scale text-center">
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-48 rounded-full blur-3xl opacity-15 bg-yellow-500 pointer-events-none -translate-y-1/2" />
+              <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-5">
+                <AlertTriangle className="w-8 h-8 text-yellow-400" />
+              </div>
+              <h3 className="text-base font-black text-white mb-2">Upload Warning</h3>
+              <p className="text-xs text-gray-400 leading-relaxed mb-6">{uploadAlert.message}</p>
+              <button
+                onClick={() => setUploadAlert(null)}
+                className="btn-premium btn-primary px-6 py-2.5 text-xs font-bold uppercase tracking-wider mx-auto"
+              >
+                Continue
               </button>
             </div>
           ) : (
@@ -778,7 +857,7 @@ export default function InvoicesView({
             <div className="p-3 border border-white/5 rounded-xl bg-slate-950/20 text-left text-xs mb-6">
               <span className="block text-[8px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Suggested Action Recommendation</span>
               <div className="flex gap-2 items-center text-gray-300">
-                <Info className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                <Info className="w-4 h-4 text-blue-400 shrink-0" />
                 <span>{uploadAlert.aiRecommendations?.[0]}</span>
               </div>
             </div>
