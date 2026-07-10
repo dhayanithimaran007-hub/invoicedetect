@@ -240,7 +240,7 @@ export default function InvoicesView({
           });
 
           // Persist audit record to Supabase in the background (non-blocking)
-          persistInvoiceToSupabase(invoiceData);
+          //persistInvoiceToSupabase(invoiceData);
 
         }, 300);
       }
